@@ -142,8 +142,34 @@ def get_dataset(
         itos          (dict[int, str])
     """
     # TODO 1.1: implement
-    raise NotImplementedError
+   
+    os.makedirs(data_root, exist_ok=True)
 
+    file_path = os.path.join(data_root, "input.txt")
+
+    if not os.path.exists(file_path):
+        urllib.request.urlretrieve(DATA_URL, file_path)
+
+    with open(file_path, "r", encoding="utf-8") as f:
+        text = f.read()
+
+    chars = sorted(set(text))
+    vocab_size = len(chars)
+
+    stoi = {ch: i for i, ch in enumerate(chars)}
+    itos = {i: ch for ch, i in stoi.items()}
+
+    ids = [stoi[ch] for ch in text]
+    data = torch.tensor(ids, dtype=torch.long)
+
+    split = int(train_frac * len(data))
+    train_data = data[:split]
+    val_data = data[split:]
+
+    train_dataset = CharDataset(train_data, block_size)
+    val_dataset = CharDataset(val_data, block_size)
+
+    return train_dataset, val_dataset, vocab_size, stoi, itos
 
 # ---------------------------------------------------------------------------
 # TODO 1.2  CausalSelfAttention
