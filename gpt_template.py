@@ -499,7 +499,147 @@ def train_model(
     dict : the training log (same as what is written to log_path)
     """
     # TODO 1.5: implement
-    raise NotImplementedError
+    os.makedirs(checkpoint_dir, exist_ok=True)
+
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=config["batch_size"],
+        shuffle=True,
+        drop_last=True,
+    )
+
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=config["batch_size"],
+        shuffle=False,
+        drop_last=False,
+    )
+
+    opt = torch.optim.AdamW(
+        model.parameters(),
+        lr=config["lr"],
+        weight_decay=1e-2,
+    )
+
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        opt,
+        T_max=config["epochs"],
+    )
+
+    history = []
+    total_params = sum(p.numel() for p in model.parameters())
+
+    for epoch in range(1, config["epochs"] + 1):
+        start = time.time()
+        model.train()
+
+        train_losses = []
+        data_iter = iter(train_loader)
+
+        for _ in range(config["steps_per_epoch"]):
+            try:
+                x, y = next(data_iter)
+            except StopIteration:
+                data_iter = iter(train_loader)
+                x, y = next(data_iter)
+
+            logits = model(x)
+
+            B, T, V = logits.shape
+            loss = F.cross_entropy(
+                logits.view(B * T, V),
+                y.view(B * T),
+            )
+
+            opt.zero_grad()
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            opt.step()
+
+            train_losses.append(loss.item())
+
+        scheduler.step()
+
+        model.eval()
+        val_losses = []
+
+        with torch.no_grad():
+            for i, (x, y) in enumerate(val_loader):
+                if i >= 50:
+                    break
+
+                logits = model(x)
+                B, T, V = logits.shape
+
+                loss = F.cross_entropy(
+                    logits.view(B * T, V),
+                    y.view(B * T),
+                )
+
+                val_losses.append(loss.item())
+
+        train_loss = sum(train_losses) / len(train_losses)
+        val_loss = sum(val_losses) / len(val_losses)
+        epoch_time = time.time() - start
+
+        row = {
+            "epoch": epoch,
+            "train_loss": round(train_loss, 4),
+            "val_loss": round(val_loss, 4),
+            "epoch_time_sec": round(epoch_time, 4),
+        }
+
+        history.append(row)
+
+        print(
+            f"epoch {epoch}: "
+            f"train_loss={row['train_loss']:.4f}, "
+            f"val_loss={row['val_loss']:.4f}"
+        )
+
+        if epoch in CHECKPOINT_EPOCHS:
+            ckpt = {
+                "model_state_dict": model.state_dict(),
+                "config": {
+                    k: config[k]
+                    for k in [
+                        "block_size",
+                        "embed_dim",
+                        "num_heads",
+                        "num_layers",
+                        "mlp_dim",
+                        "dropout",
+                    ]
+                },
+                "epoch": epoch,
+            }
+
+            path = os.path.join(checkpoint_dir, f"gpt_epoch_{epoch}.pt")
+            torch.save(ckpt, path)
+
+    log = {
+        "seed": SEED,
+        "config": {
+            "block_size": config["block_size"],
+            "embed_dim": config["embed_dim"],
+            "num_heads": config["num_heads"],
+            "num_layers": config["num_layers"],
+            "mlp_dim": config["mlp_dim"],
+            "dropout": config["dropout"],
+            "lr": config["lr"],
+            "batch_size": config["batch_size"],
+            "epochs": config["epochs"],
+            "steps_per_epoch": config["steps_per_epoch"],
+        },
+        "history": history,
+        "final_val_loss": history[-1]["val_loss"],
+        "total_params": total_params,
+    }
+
+    with open(log_path, "w") as f:
+        json.dump(log, f, indent=2)
+
+    return log
 
 
 # ---------------------------------------------------------------------------
