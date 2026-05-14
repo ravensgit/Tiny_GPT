@@ -1,798 +1,806 @@
-"""
-CSE 676 – Deep Learning  |  Spring 2026
-Assignment 2: TinyGPT
-=====================
-
-Instructions
-------------
-1.  Implement the TODO sections:
-      Part 1 (TODOs 1.1–1.6): model components and training pipeline.
-    Do NOT modify anything outside the TODO blocks.
-
-2.  Do NOT rename classes or functions, and do NOT change any signature
-    (argument names, order, or return type contract).  The autograder
-    imports this file and calls functions by name.
-
-3.  Once Part 1 is complete, run:
-        python gpt_template.py --mode all
-
-    This trains the baseline model and generates text samples.  Inspect
-    training_log.json and generated_text.json to write your report.
-
-4.  Validate your JSON before submitting:
-        python -m json.tool training_log.json
-        python -m json.tool generated_text.json
-"""
-
-import argparse
-import json
-import math
-import os
-import random
-import time
-import urllib.request
-from typing import Dict, List, Optional, Tuple
-
-import numpy as np
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from torch.utils.data import DataLoader, Dataset
-
-
-# ---------------------------------------------------------------------------
-# Seed utilities  (do not modify)
-# ---------------------------------------------------------------------------
-
-SEED = 42   # fixed seed used for all random operations in this assignment
-
-
-def set_all_seeds(seed: int) -> None:
-    """Seed Python's random, NumPy, and PyTorch in one call."""
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-
-
-# ---------------------------------------------------------------------------
-# Baseline configuration  (do not modify)
-# ---------------------------------------------------------------------------
-
-BASELINE_CONFIG = {
-    "block_size":      128,   # context window length
-    "embed_dim":        64,   # token embedding dimension D
-    "num_heads":         4,   # number of attention heads
-    "num_layers":        4,   # number of transformer blocks
-    "mlp_dim":         128,   # MLP hidden dimension (2 × embed_dim)
-    "dropout":         0.1,
-    "lr":             3e-4,
-    "batch_size":       64,
-    "epochs":            5,
-    "steps_per_epoch": 200,   # gradient steps per epoch
-}
-
-CHECKPOINT_EPOCHS = (1, 3, 5)
-DATA_URL = (
-    "https://raw.githubusercontent.com/karpathy/char-rnn/master"
-    "/data/tinyshakespeare/input.txt"
-)
-
-
-# ---------------------------------------------------------------------------
-# Dataset  (provided – do not modify)
-# ---------------------------------------------------------------------------
-
-class CharDataset(Dataset):
     """
-    Sliding-window character-level dataset.
+    CSE 676 – Deep Learning  |  Spring 2026
+    Assignment 2: TinyGPT
+    =====================
 
-    Each item is a pair (x, y) where:
-      x = data[idx : idx + block_size]     input context
-      y = data[idx+1 : idx + block_size+1] target (shifted by one position)
+    Instructions
+    ------------
+    1.  Implement the TODO sections:
+        Part 1 (TODOs 1.1–1.6): model components and training pipeline.
+        Do NOT modify anything outside the TODO blocks.
+
+    2.  Do NOT rename classes or functions, and do NOT change any signature
+        (argument names, order, or return type contract).  The autograder
+        imports this file and calls functions by name.
+
+    3.  Once Part 1 is complete, run:
+            python gpt_template.py --mode all
+
+        This trains the baseline model and generates text samples.  Inspect
+        training_log.json and generated_text.json to write your report.
+
+    4.  Validate your JSON before submitting:
+            python -m json.tool training_log.json
+            python -m json.tool generated_text.json
     """
 
-    def __init__(self, data: torch.Tensor, block_size: int):
-        self.data       = data
-        self.block_size = block_size
+    import argparse
+    import json
+    import math
+    import os
+    import random
+    import time
+    import urllib.request
+    from typing import Dict, List, Optional, Tuple
 
-    def __len__(self):
-        return len(self.data) - self.block_size
-
-    def __getitem__(self, idx):
-        x = self.data[idx     : idx + self.block_size]
-        y = self.data[idx + 1 : idx + self.block_size + 1]
-        return x, y
+    import numpy as np
+    import torch
+    import torch.nn as nn
+    import torch.nn.functional as F
+    from torch.utils.data import DataLoader, Dataset
 
 
-# ---------------------------------------------------------------------------
-# TODO 1.1  get_dataset
-# ---------------------------------------------------------------------------
+    # ---------------------------------------------------------------------------
+    # Seed utilities  (do not modify)
+    # ---------------------------------------------------------------------------
 
-def get_dataset(
-    data_root:  str   = "data",
-    block_size: int   = 128,
-    train_frac: float = 0.9,
-):
-    """
-    Download TinyShakespeare if needed, build a character vocabulary, and
-    return training / validation CharDataset objects with vocabulary metadata.
+    SEED = 42   # fixed seed used for all random operations in this assignment
 
-    Steps
-    -----
-    1.  Create data_root with os.makedirs if it does not exist.
-    2.  Download DATA_URL to os.path.join(data_root, 'input.txt') if the
-        file is not already present.  Use urllib.request.urlretrieve.
-    3.  Read the full text from 'input.txt'.
-    4.  Build the vocabulary: chars = sorted(set(text)), vocab_size = len(chars).
-        Construct stoi (char→int) and itos (int→char) dicts.
-    5.  Encode the entire text as a LongTensor using stoi.
-    6.  Split: first train_frac of the data is training; rest is validation.
-    7.  Wrap each split in CharDataset(split_data, block_size) and return.
 
-    Args:
-        data_root  (str):   Directory to store/read 'input.txt'.
-        block_size (int):   Context window length.
-        train_frac (float): Fraction of data for training.
+    def set_all_seeds(seed: int) -> None:
+        """Seed Python's random, NumPy, and PyTorch in one call."""
+        random.seed(seed)
+        np.random.seed(seed)
+        torch.manual_seed(seed)
 
-    Returns:
-        train_dataset (CharDataset)
-        val_dataset   (CharDataset)
-        vocab_size    (int)
-        stoi          (dict[str, int])
-        itos          (dict[int, str])
-    """
-    # TODO 1.1: implement
-   
-    os.makedirs(data_root, exist_ok=True)
 
-    file_path = os.path.join(data_root, "input.txt")
+    # ---------------------------------------------------------------------------
+    # Baseline configuration  (do not modify)
+    # ---------------------------------------------------------------------------
 
-    if not os.path.exists(file_path):
-        urllib.request.urlretrieve(DATA_URL, file_path)
+    BASELINE_CONFIG = {
+        "block_size":      128,   # context window length
+        "embed_dim":        64,   # token embedding dimension D
+        "num_heads":         4,   # number of attention heads
+        "num_layers":        4,   # number of transformer blocks
+        "mlp_dim":         128,   # MLP hidden dimension (2 × embed_dim)
+        "dropout":         0.1,
+        "lr":             3e-4,
+        "batch_size":       64,
+        "epochs":            5,
+        "steps_per_epoch": 200,   # gradient steps per epoch
+    }
 
-    with open(file_path, "r", encoding="utf-8") as f:
-        text = f.read()
+    CHECKPOINT_EPOCHS = (1, 3, 5)
+    DATA_URL = (
+        "https://raw.githubusercontent.com/karpathy/char-rnn/master"
+        "/data/tinyshakespeare/input.txt"
+    )
 
-    chars = sorted(set(text))
-    vocab_size = len(chars)
 
-    stoi = {ch: i for i, ch in enumerate(chars)}
-    itos = {i: ch for ch, i in stoi.items()}
+    # ---------------------------------------------------------------------------
+    # Dataset  (provided – do not modify)
+    # ---------------------------------------------------------------------------
 
-    ids = [stoi[ch] for ch in text]
-    data = torch.tensor(ids, dtype=torch.long)
+    class CharDataset(Dataset):
+        """
+        Sliding-window character-level dataset.
 
-    split = int(train_frac * len(data))
-    train_data = data[:split]
-    val_data = data[split:]
+        Each item is a pair (x, y) where:
+        x = data[idx : idx + block_size]     input context
+        y = data[idx+1 : idx + block_size+1] target (shifted by one position)
+        """
 
-    train_dataset = CharDataset(train_data, block_size)
-    val_dataset = CharDataset(val_data, block_size)
+        def __init__(self, data: torch.Tensor, block_size: int):
+            self.data       = data
+            self.block_size = block_size
 
-    return train_dataset, val_dataset, vocab_size, stoi, itos
+        def __len__(self):
+            return len(self.data) - self.block_size
 
-# ---------------------------------------------------------------------------
-# TODO 1.2  CausalSelfAttention
-# ---------------------------------------------------------------------------
+        def __getitem__(self, idx):
+            x = self.data[idx     : idx + self.block_size]
+            y = self.data[idx + 1 : idx + self.block_size + 1]
+            return x, y
 
-class CausalSelfAttention(nn.Module):
-    """
-    Multi-head causal self-attention.
 
-    Each token at position i may attend only to tokens at positions ≤ i.
-    Positions i+1, i+2, … are masked to −∞ before the softmax so they
-    receive zero attention weight.
+    # ---------------------------------------------------------------------------
+    # TODO 1.1  get_dataset
+    # ---------------------------------------------------------------------------
 
-    Args:
-        embed_dim  (int):   Total embedding dimension D (must be divisible by num_heads).
-        num_heads  (int):   Number of attention heads h.
-        block_size (int):   Maximum sequence length; used to pre-allocate the mask.
-        dropout    (float): Dropout applied to attention weights and the residual output.
-
-    Required attributes (autograder checks these names):
-        self.qkv        nn.Linear(embed_dim, 3 * embed_dim, bias=False)
-        self.out_proj   nn.Linear(embed_dim, embed_dim, bias=False)
-        self.attn_drop  nn.Dropout
-        self.resid_drop nn.Dropout
-        self.mask       lower-triangular buffer shape (1, 1, block_size, block_size)
-
-    Do NOT use nn.MultiheadAttention.
-
-    Forward:
-        x : Tensor (B, T, D)   where T ≤ block_size
-    Returns:
-        Tensor (B, T, D)
-    """
-
-    def __init__(
-        self,
-        embed_dim:  int,
-        num_heads:  int,
-        block_size: int,
-        dropout:    float = 0.0,
+    def get_dataset(
+        data_root:  str   = "data",
+        block_size: int   = 128,
+        train_frac: float = 0.9,
     ):
-        super().__init__()
-        # TODO 1.2 – __init__:
-        assert embed_dim % num_heads == 0
+        """
+        Download TinyShakespeare if needed, build a character vocabulary, and
+        return training / validation CharDataset objects with vocabulary metadata.
 
-        self.num_heads = num_heads
-        self.head_dim = embed_dim // num_heads
-        self.embed_dim = embed_dim
+        Steps
+        -----
+        1.  Create data_root with os.makedirs if it does not exist.
+        2.  Download DATA_URL to os.path.join(data_root, 'input.txt') if the
+            file is not already present.  Use urllib.request.urlretrieve.
+        3.  Read the full text from 'input.txt'.
+        4.  Build the vocabulary: chars = sorted(set(text)), vocab_size = len(chars).
+            Construct stoi (char→int) and itos (int→char) dicts.
+        5.  Encode the entire text as a LongTensor using stoi.
+        6.  Split: first train_frac of the data is training; rest is validation.
+        7.  Wrap each split in CharDataset(split_data, block_size) and return.
 
-        self.qkv = nn.Linear(embed_dim, 3 * embed_dim, bias=False)
-        self.out_proj = nn.Linear(embed_dim, embed_dim, bias=False)
+        Args:
+            data_root  (str):   Directory to store/read 'input.txt'.
+            block_size (int):   Context window length.
+            train_frac (float): Fraction of data for training.
 
-        self.attn_drop = nn.Dropout(dropout)
-        self.resid_drop = nn.Dropout(dropout)
+        Returns:
+            train_dataset (CharDataset)
+            val_dataset   (CharDataset)
+            vocab_size    (int)
+            stoi          (dict[str, int])
+            itos          (dict[int, str])
+        """
+        # TODO 1.1: implement
+    
+        os.makedirs(data_root, exist_ok=True)
 
-        mask = torch.tril(torch.ones(block_size, block_size))
-        mask = mask.view(1, 1, block_size, block_size)
-        self.register_buffer("mask", mask)
+        file_path = os.path.join(data_root, "input.txt")
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # TODO 1.2 – forward:
-        B, T, C = x.shape
+        if not os.path.exists(file_path):
+            urllib.request.urlretrieve(DATA_URL, file_path)
 
-        qkv = self.qkv(x)
-        q, k, v = qkv.chunk(3, dim=-1)
+        with open(file_path, "r", encoding="utf-8") as f:
+            text = f.read()
 
-        q = q.view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
-        k = k.view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
-        v = v.view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
+        chars = sorted(set(text))
+        vocab_size = len(chars)
 
-        att = q @ k.transpose(-2, -1)
-        att = att / math.sqrt(self.head_dim)
-        att = att.masked_fill(self.mask[:, :, :T, :T] == 0, float("-inf"))
+        stoi = {ch: i for i, ch in enumerate(chars)}
+        itos = {i: ch for ch, i in stoi.items()}
 
-        att = F.softmax(att, dim=-1)
-        att = self.attn_drop(att)
+        ids = [stoi[ch] for ch in text]
+        data = torch.tensor(ids, dtype=torch.long)
 
-        out = att @ v
-        out = out.transpose(1, 2).contiguous().view(B, T, C)
+        split = int(train_frac * len(data))
+        train_data = data[:split]
+        val_data = data[split:]
 
-        out = self.out_proj(out)
-        out = self.resid_drop(out)
+        train_dataset = CharDataset(train_data, block_size)
+        val_dataset = CharDataset(val_data, block_size)
 
-        return out
-        
+        return train_dataset, val_dataset, vocab_size, stoi, itos
 
-# ---------------------------------------------------------------------------
-# TODO 1.3  GPTBlock
-# ---------------------------------------------------------------------------
+    # ---------------------------------------------------------------------------
+    # TODO 1.2  CausalSelfAttention
+    # ---------------------------------------------------------------------------
 
-class GPTBlock(nn.Module):
-    """
-    A single GPT transformer block (decoder-only, pre-norm).
+    class CausalSelfAttention(nn.Module):
+        """
+        Multi-head causal self-attention.
 
-    Pre-norm means LayerNorm is applied BEFORE the sub-layer (not after):
-        x ← x + CausalSelfAttention(LayerNorm(x))
-        x ← x + MLP(LayerNorm(x))
+        Each token at position i may attend only to tokens at positions ≤ i.
+        Positions i+1, i+2, … are masked to −∞ before the softmax so they
+        receive zero attention weight.
 
-    The MLP is a two-layer feed-forward network:
-        Linear(embed_dim → mlp_dim) → GELU → Linear(mlp_dim → embed_dim) → Dropout
+        Args:
+            embed_dim  (int):   Total embedding dimension D (must be divisible by num_heads).
+            num_heads  (int):   Number of attention heads h.
+            block_size (int):   Maximum sequence length; used to pre-allocate the mask.
+            dropout    (float): Dropout applied to attention weights and the residual output.
 
-    Args:
-        embed_dim  (int):   Embedding dimension D.
-        num_heads  (int):   Number of attention heads.
-        block_size (int):   Maximum sequence length.
-        mlp_dim    (int):   Hidden dimension of the MLP.
-        dropout    (float): Dropout probability.
+        Required attributes (autograder checks these names):
+            self.qkv        nn.Linear(embed_dim, 3 * embed_dim, bias=False)
+            self.out_proj   nn.Linear(embed_dim, embed_dim, bias=False)
+            self.attn_drop  nn.Dropout
+            self.resid_drop nn.Dropout
+            self.mask       lower-triangular buffer shape (1, 1, block_size, block_size)
 
-    Required sub-module names (autograder checks):
-        self.norm1  nn.LayerNorm(embed_dim)
-        self.attn   CausalSelfAttention(...)
-        self.norm2  nn.LayerNorm(embed_dim)
-        self.mlp    nn.Sequential(Linear, GELU, Linear, Dropout)
+        Do NOT use nn.MultiheadAttention.
 
-    Forward:
-        x : Tensor (B, T, D)
-    Returns:
-        Tensor (B, T, D)
-    """
+        Forward:
+            x : Tensor (B, T, D)   where T ≤ block_size
+        Returns:
+            Tensor (B, T, D)
+        """
 
-    def __init__(
-        self,
-        embed_dim:  int,
-        num_heads:  int,
-        block_size: int,
-        mlp_dim:    int,
-        dropout:    float = 0.0,
-    ):
-        super().__init__()
-        # TODO 1.3 – __init__: create norm1, attn, norm2, mlp
-        self.norm1 = nn.LayerNorm(embed_dim)
-        self.attn = CausalSelfAttention(
-            embed_dim=embed_dim,
-            num_heads=num_heads,
-            block_size=block_size,
-            dropout=dropout,
-        )
+        def __init__(
+            self,
+            embed_dim:  int,
+            num_heads:  int,
+            block_size: int,
+            dropout:    float = 0.0,
+        ):
+            super().__init__()
+            # TODO 1.2 – __init__:
+            assert embed_dim % num_heads == 0
 
-        self.norm2 = nn.LayerNorm(embed_dim)
-        self.mlp = nn.Sequential(
-            nn.Linear(embed_dim, mlp_dim),
-            nn.GELU(),
-            nn.Linear(mlp_dim, embed_dim),
-            nn.Dropout(dropout),
-        )
+            self.num_heads = num_heads
+            self.head_dim = embed_dim // num_heads
+            self.embed_dim = embed_dim
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # TODO 1.3 – forward: apply pre-norm residual connections
-        x = x + self.attn(self.norm1(x))
-        x = x + self.mlp(self.norm2(x))
-        return x
+            self.qkv = nn.Linear(embed_dim, 3 * embed_dim, bias=False)
+            self.out_proj = nn.Linear(embed_dim, embed_dim, bias=False)
 
+            self.attn_drop = nn.Dropout(dropout)
+            self.resid_drop = nn.Dropout(dropout)
 
-# ---------------------------------------------------------------------------
-# TODO 1.4  GPT
-# ---------------------------------------------------------------------------
+            mask = torch.tril(torch.ones(block_size, block_size))
+            mask = mask.view(1, 1, block_size, block_size)
+            self.register_buffer("mask", mask)
 
-class GPT(nn.Module):
-    """
-    TinyGPT: a decoder-only transformer language model.
+        def forward(self, x: torch.Tensor) -> torch.Tensor:
+            # TODO 1.2 – forward:
+            B, T, C = x.shape
 
-    Architecture (in order):
-        1. Token embedding    nn.Embedding(vocab_size, embed_dim)
-        2. Position embedding nn.Embedding(block_size, embed_dim)
-        3. Dropout on summed embeddings
-        4. num_layers × GPTBlock
-        5. Final LayerNorm
-        6. Linear LM head (weight-tied with token embedding)
+            qkv = self.qkv(x)
+            q, k, v = qkv.chunk(3, dim=-1)
 
-    Weight tying  ←  this is important:
-        After creating self.head, set
-            self.head.weight = self.token_embedding.weight
-        Both the input embedding and the output projection then share one
-        matrix of shape (vocab_size, embed_dim), reducing parameter count
-        and typically improving perplexity.
+            q = q.view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
+            k = k.view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
+            v = v.view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
 
-    Args:
-        vocab_size (int):   Number of unique tokens (characters).
-        block_size (int):   Maximum context length.
-        embed_dim  (int):   Embedding dimension D.
-        num_heads  (int):   Number of attention heads per block.
-        num_layers (int):   Number of GPTBlocks.
-        mlp_dim    (int):   MLP hidden dimension.
-        dropout    (float): Dropout probability.
+            att = q @ k.transpose(-2, -1)
+            att = att / math.sqrt(self.head_dim)
+            att = att.masked_fill(self.mask[:, :, :T, :T] == 0, float("-inf"))
 
-    Required attribute names (autograder checks):
-        self.token_embedding  nn.Embedding
-        self.pos_embedding    nn.Embedding
-        self.drop             nn.Dropout
-        self.blocks           nn.ModuleList of GPTBlock
-        self.norm             nn.LayerNorm
-        self.head             nn.Linear (weight-tied)
+            att = F.softmax(att, dim=-1)
+            att = self.attn_drop(att)
 
-    Forward:
-        idx : LongTensor (B, T)  token indices, T ≤ block_size
-    Returns:
-        logits : FloatTensor (B, T, vocab_size)
-    """
+            out = att @ v
+            out = out.transpose(1, 2).contiguous().view(B, T, C)
 
-    def __init__(
-        self,
-        vocab_size: int,
-        block_size: int,
-        embed_dim:  int,
-        num_heads:  int,
-        num_layers: int,
-        mlp_dim:    int,
-        dropout:    float = 0.0,
-    ):
-        super().__init__()
-        self.block_size = block_size
-        # TODO 1.4 – __init__: create all sub-modules and tie weights
-        self.token_embedding = nn.Embedding(vocab_size, embed_dim)
-        self.pos_embedding = nn.Embedding(block_size, embed_dim)
+            out = self.out_proj(out)
+            out = self.resid_drop(out)
 
-        self.drop = nn.Dropout(dropout)
+            return out
+            
 
-        self.blocks = nn.ModuleList([
-            GPTBlock(
+    # ---------------------------------------------------------------------------
+    # TODO 1.3  GPTBlock
+    # ---------------------------------------------------------------------------
+
+    class GPTBlock(nn.Module):
+        """
+        A single GPT transformer block (decoder-only, pre-norm).
+
+        Pre-norm means LayerNorm is applied BEFORE the sub-layer (not after):
+            x ← x + CausalSelfAttention(LayerNorm(x))
+            x ← x + MLP(LayerNorm(x))
+
+        The MLP is a two-layer feed-forward network:
+            Linear(embed_dim → mlp_dim) → GELU → Linear(mlp_dim → embed_dim) → Dropout
+
+        Args:
+            embed_dim  (int):   Embedding dimension D.
+            num_heads  (int):   Number of attention heads.
+            block_size (int):   Maximum sequence length.
+            mlp_dim    (int):   Hidden dimension of the MLP.
+            dropout    (float): Dropout probability.
+
+        Required sub-module names (autograder checks):
+            self.norm1  nn.LayerNorm(embed_dim)
+            self.attn   CausalSelfAttention(...)
+            self.norm2  nn.LayerNorm(embed_dim)
+            self.mlp    nn.Sequential(Linear, GELU, Linear, Dropout)
+
+        Forward:
+            x : Tensor (B, T, D)
+        Returns:
+            Tensor (B, T, D)
+        """
+
+        def __init__(
+            self,
+            embed_dim:  int,
+            num_heads:  int,
+            block_size: int,
+            mlp_dim:    int,
+            dropout:    float = 0.0,
+        ):
+            super().__init__()
+            # TODO 1.3 – __init__: create norm1, attn, norm2, mlp
+            self.norm1 = nn.LayerNorm(embed_dim)
+            self.attn = CausalSelfAttention(
                 embed_dim=embed_dim,
                 num_heads=num_heads,
                 block_size=block_size,
-                mlp_dim=mlp_dim,
                 dropout=dropout,
             )
-            for _ in range(num_layers)
-        ])
 
-        self.norm = nn.LayerNorm(embed_dim)
-        self.head = nn.Linear(embed_dim, vocab_size, bias=False)
-
-        self.head.weight = self.token_embedding.weight
-
-    def forward(self, idx: torch.Tensor) -> torch.Tensor:
-        # TODO 1.4 – forward:
-        # 1. Unpack B, T; assert T <= self.block_size
-        # 2. Compute token and position embeddings; add them; apply dropout
-        # 3. Pass through each block in self.blocks
-        # 4. Apply self.norm and self.head
-        B, T = idx.shape
-        assert T <= self.block_size
-
-        pos = torch.arange(T, device=idx.device)
-
-        tok_emb = self.token_embedding(idx)
-        pos_emb = self.pos_embedding(pos)
-
-        x = tok_emb + pos_emb
-        x = self.drop(x)
-
-        for block in self.blocks:
-            x = block(x)
-
-        x = self.norm(x)
-        logits = self.head(x)
-
-        return logits
-
-
-def build_model(config: dict, vocab_size: int) -> "GPT":
-    """Construct a GPT from a config dict and vocab_size.  (Do not modify.)"""
-    return GPT(
-        vocab_size = vocab_size,
-        block_size = config["block_size"],
-        embed_dim  = config["embed_dim"],
-        num_heads  = config["num_heads"],
-        num_layers = config["num_layers"],
-        mlp_dim    = config["mlp_dim"],
-        dropout    = config["dropout"],
-    )
-
-
-# ---------------------------------------------------------------------------
-# TODO 1.5  train_model
-# ---------------------------------------------------------------------------
-
-def train_model(
-    model:          "GPT",
-    train_dataset:  CharDataset,
-    val_dataset:    CharDataset,
-    config:         dict,
-    checkpoint_dir: str = "checkpoints",
-    log_path:       str = "training_log.json",
-) -> dict:
-    """
-    Train the GPT model for next-character prediction.
-
-    Requirements
-    ------------
-    Optimizer:   AdamW, lr = config["lr"], weight_decay = 1e-2
-    LR schedule: CosineAnnealingLR with T_max = config["epochs"]
-    Loss:        cross-entropy over ALL token positions in the batch
-                 (flatten logits to (B*T, V) and targets to (B*T,))
-    Gradient clipping: torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-    Each epoch:  sample batches from a shuffled DataLoader until
-                 config["steps_per_epoch"] gradient steps are done.
-    Validation:  after each epoch, evaluate on up to 50 batches from
-                 val_dataset (no gradient).
-    Checkpoints: save at every epoch in CHECKPOINT_EPOCHS.
-    Logging:     after all epochs, write training_log.json.
-
-    JSON schema (see assignment.pdf Section 5 for full spec)
-    --------------------------------------------------------
-    {
-      "seed"           : <int>,
-      "config"         : { ... },
-      "history"        : [
-         {"epoch": 1, "train_loss": <float>, "val_loss": <float>,
-          "epoch_time_sec": <float>},
-         ...
-      ],
-      "final_val_loss" : <float>,
-      "total_params"   : <int>
-    }
-
-    Checkpoint format
-    -----------------
-    torch.save({
-        "model_state_dict": model.state_dict(),
-        "config": {k: config[k] for k in
-                   ["block_size","embed_dim","num_heads","num_layers","mlp_dim","dropout"]},
-        "epoch": <int>,
-    }, os.path.join(checkpoint_dir, f"gpt_epoch_{epoch}.pt"))
-
-    Returns
-    -------
-    dict : the training log (same as what is written to log_path)
-    """
-    # TODO 1.5: implement
-    os.makedirs(checkpoint_dir, exist_ok=True)
-
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=config["batch_size"],
-        shuffle=True,
-        drop_last=True,
-    )
-
-    val_loader = DataLoader(
-        val_dataset,
-        batch_size=config["batch_size"],
-        shuffle=False,
-        drop_last=False,
-    )
-
-    opt = torch.optim.AdamW(
-        model.parameters(),
-        lr=config["lr"],
-        weight_decay=1e-2,
-    )
-
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        opt,
-        T_max=config["epochs"],
-    )
-
-    history = []
-    total_params = sum(p.numel() for p in model.parameters())
-
-    for epoch in range(1, config["epochs"] + 1):
-        start = time.time()
-        model.train()
-
-        train_losses = []
-        data_iter = iter(train_loader)
-
-        for _ in range(config["steps_per_epoch"]):
-            try:
-                x, y = next(data_iter)
-            except StopIteration:
-                data_iter = iter(train_loader)
-                x, y = next(data_iter)
-
-            logits = model(x)
-
-            B, T, V = logits.shape
-            loss = F.cross_entropy(
-                logits.view(B * T, V),
-                y.view(B * T),
+            self.norm2 = nn.LayerNorm(embed_dim)
+            self.mlp = nn.Sequential(
+                nn.Linear(embed_dim, mlp_dim),
+                nn.GELU(),
+                nn.Linear(mlp_dim, embed_dim),
+                nn.Dropout(dropout),
             )
 
-            opt.zero_grad()
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-            opt.step()
+        def forward(self, x: torch.Tensor) -> torch.Tensor:
+            # TODO 1.3 – forward: apply pre-norm residual connections
+            x = x + self.attn(self.norm1(x))
+            x = x + self.mlp(self.norm2(x))
+            return x
 
-            train_losses.append(loss.item())
 
-        scheduler.step()
+    # ---------------------------------------------------------------------------
+    # TODO 1.4  GPT
+    # ---------------------------------------------------------------------------
 
-        model.eval()
-        val_losses = []
+    class GPT(nn.Module):
+        """
+        TinyGPT: a decoder-only transformer language model.
 
-        with torch.no_grad():
-            for i, (x, y) in enumerate(val_loader):
-                if i >= 50:
-                    break
+        Architecture (in order):
+            1. Token embedding    nn.Embedding(vocab_size, embed_dim)
+            2. Position embedding nn.Embedding(block_size, embed_dim)
+            3. Dropout on summed embeddings
+            4. num_layers × GPTBlock
+            5. Final LayerNorm
+            6. Linear LM head (weight-tied with token embedding)
+
+        Weight tying  ←  this is important:
+            After creating self.head, set
+                self.head.weight = self.token_embedding.weight
+            Both the input embedding and the output projection then share one
+            matrix of shape (vocab_size, embed_dim), reducing parameter count
+            and typically improving perplexity.
+
+        Args:
+            vocab_size (int):   Number of unique tokens (characters).
+            block_size (int):   Maximum context length.
+            embed_dim  (int):   Embedding dimension D.
+            num_heads  (int):   Number of attention heads per block.
+            num_layers (int):   Number of GPTBlocks.
+            mlp_dim    (int):   MLP hidden dimension.
+            dropout    (float): Dropout probability.
+
+        Required attribute names (autograder checks):
+            self.token_embedding  nn.Embedding
+            self.pos_embedding    nn.Embedding
+            self.drop             nn.Dropout
+            self.blocks           nn.ModuleList of GPTBlock
+            self.norm             nn.LayerNorm
+            self.head             nn.Linear (weight-tied)
+
+        Forward:
+            idx : LongTensor (B, T)  token indices, T ≤ block_size
+        Returns:
+            logits : FloatTensor (B, T, vocab_size)
+        """
+
+        def __init__(
+            self,
+            vocab_size: int,
+            block_size: int,
+            embed_dim:  int,
+            num_heads:  int,
+            num_layers: int,
+            mlp_dim:    int,
+            dropout:    float = 0.0,
+        ):
+            super().__init__()
+            self.block_size = block_size
+            # TODO 1.4 – __init__: create all sub-modules and tie weights
+            self.token_embedding = nn.Embedding(vocab_size, embed_dim)
+            self.pos_embedding = nn.Embedding(block_size, embed_dim)
+
+            self.drop = nn.Dropout(dropout)
+
+            self.blocks = nn.ModuleList([
+                GPTBlock(
+                    embed_dim=embed_dim,
+                    num_heads=num_heads,
+                    block_size=block_size,
+                    mlp_dim=mlp_dim,
+                    dropout=dropout,
+                )
+                for _ in range(num_layers)
+            ])
+
+            self.norm = nn.LayerNorm(embed_dim)
+            self.head = nn.Linear(embed_dim, vocab_size, bias=False)
+
+            for m in self.modules():
+                if isinstance(m, nn.Linear):
+                    nn.init.normal_(m.weight, mean=0.0, std=0.02)
+                    if m.bias is not None:
+                        nn.init.zeros_(m.bias)
+                elif isinstance(m, nn.Embedding):
+                    nn.init.normal_(m.weight, mean=0.0, std=0.02)
+
+            self.head.weight = self.token_embedding.weight
+
+        def forward(self, idx: torch.Tensor) -> torch.Tensor:
+            # TODO 1.4 – forward:
+            # 1. Unpack B, T; assert T <= self.block_size
+            # 2. Compute token and position embeddings; add them; apply dropout
+            # 3. Pass through each block in self.blocks
+            # 4. Apply self.norm and self.head
+            B, T = idx.shape
+            assert T <= self.block_size
+
+            pos = torch.arange(T, device=idx.device)
+
+            tok_emb = self.token_embedding(idx)
+            pos_emb = self.pos_embedding(pos)
+
+            x = tok_emb + pos_emb
+            x = self.drop(x)
+
+            for block in self.blocks:
+                x = block(x)
+
+            x = self.norm(x)
+            logits = self.head(x)
+
+            return logits
+
+
+    def build_model(config: dict, vocab_size: int) -> "GPT":
+        """Construct a GPT from a config dict and vocab_size.  (Do not modify.)"""
+        return GPT(
+            vocab_size = vocab_size,
+            block_size = config["block_size"],
+            embed_dim  = config["embed_dim"],
+            num_heads  = config["num_heads"],
+            num_layers = config["num_layers"],
+            mlp_dim    = config["mlp_dim"],
+            dropout    = config["dropout"],
+        )
+
+
+    # ---------------------------------------------------------------------------
+    # TODO 1.5  train_model
+    # ---------------------------------------------------------------------------
+
+    def train_model(
+        model:          "GPT",
+        train_dataset:  CharDataset,
+        val_dataset:    CharDataset,
+        config:         dict,
+        checkpoint_dir: str = "checkpoints",
+        log_path:       str = "training_log.json",
+    ) -> dict:
+        """
+        Train the GPT model for next-character prediction.
+
+        Requirements
+        ------------
+        Optimizer:   AdamW, lr = config["lr"], weight_decay = 1e-2
+        LR schedule: CosineAnnealingLR with T_max = config["epochs"]
+        Loss:        cross-entropy over ALL token positions in the batch
+                    (flatten logits to (B*T, V) and targets to (B*T,))
+        Gradient clipping: torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+        Each epoch:  sample batches from a shuffled DataLoader until
+                    config["steps_per_epoch"] gradient steps are done.
+        Validation:  after each epoch, evaluate on up to 50 batches from
+                    val_dataset (no gradient).
+        Checkpoints: save at every epoch in CHECKPOINT_EPOCHS.
+        Logging:     after all epochs, write training_log.json.
+
+        JSON schema (see assignment.pdf Section 5 for full spec)
+        --------------------------------------------------------
+        {
+        "seed"           : <int>,
+        "config"         : { ... },
+        "history"        : [
+            {"epoch": 1, "train_loss": <float>, "val_loss": <float>,
+            "epoch_time_sec": <float>},
+            ...
+        ],
+        "final_val_loss" : <float>,
+        "total_params"   : <int>
+        }
+
+        Checkpoint format
+        -----------------
+        torch.save({
+            "model_state_dict": model.state_dict(),
+            "config": {k: config[k] for k in
+                    ["block_size","embed_dim","num_heads","num_layers","mlp_dim","dropout"]},
+            "epoch": <int>,
+        }, os.path.join(checkpoint_dir, f"gpt_epoch_{epoch}.pt"))
+
+        Returns
+        -------
+        dict : the training log (same as what is written to log_path)
+        """
+        # TODO 1.5: implement
+        os.makedirs(checkpoint_dir, exist_ok=True)
+
+        train_loader = DataLoader(
+            train_dataset,
+            batch_size=config["batch_size"],
+            shuffle=True,
+            drop_last=True,
+        )
+
+        val_loader = DataLoader(
+            val_dataset,
+            batch_size=config["batch_size"],
+            shuffle=False,
+            drop_last=False,
+        )
+
+        opt = torch.optim.AdamW(
+            model.parameters(),
+            lr=config["lr"],
+            weight_decay=1e-2,
+        )
+
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            opt,
+            T_max=config["epochs"],
+        )
+
+        history = []
+        total_params = sum(p.numel() for p in model.parameters())
+
+        for epoch in range(1, config["epochs"] + 1):
+            start = time.time()
+            model.train()
+
+            train_losses = []
+            data_iter = iter(train_loader)
+
+            for _ in range(config["steps_per_epoch"]):
+                try:
+                    x, y = next(data_iter)
+                except StopIteration:
+                    data_iter = iter(train_loader)
+                    x, y = next(data_iter)
 
                 logits = model(x)
-                B, T, V = logits.shape
 
+                B, T, V = logits.shape
                 loss = F.cross_entropy(
                     logits.view(B * T, V),
                     y.view(B * T),
                 )
 
-                val_losses.append(loss.item())
+                opt.zero_grad()
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                opt.step()
 
-        train_loss = sum(train_losses) / len(train_losses)
-        val_loss = sum(val_losses) / len(val_losses)
-        epoch_time = time.time() - start
+                train_losses.append(loss.item())
 
-        row = {
-            "epoch": epoch,
-            "train_loss": round(train_loss, 4),
-            "val_loss": round(val_loss, 4),
-            "epoch_time_sec": round(epoch_time, 4),
-        }
+            scheduler.step()
 
-        history.append(row)
+            model.eval()
+            val_losses = []
 
-        print(
-            f"epoch {epoch}: "
-            f"train_loss={row['train_loss']:.4f}, "
-            f"val_loss={row['val_loss']:.4f}"
-        )
+            with torch.no_grad():
+                for i, (x, y) in enumerate(val_loader):
+                    if i >= 50:
+                        break
 
-        if epoch in CHECKPOINT_EPOCHS:
-            ckpt = {
-                "model_state_dict": model.state_dict(),
-                "config": {
-                    k: config[k]
-                    for k in [
-                        "block_size",
-                        "embed_dim",
-                        "num_heads",
-                        "num_layers",
-                        "mlp_dim",
-                        "dropout",
-                    ]
-                },
+                    logits = model(x)
+                    B, T, V = logits.shape
+
+                    loss = F.cross_entropy(
+                        logits.view(B * T, V),
+                        y.view(B * T),
+                    )
+
+                    val_losses.append(loss.item())
+
+            train_loss = sum(train_losses) / len(train_losses)
+            val_loss = sum(val_losses) / len(val_losses)
+            epoch_time = time.time() - start
+
+            row = {
                 "epoch": epoch,
+                "train_loss": round(train_loss, 4),
+                "val_loss": round(val_loss, 4),
+                "epoch_time_sec": round(epoch_time, 4),
             }
 
-            path = os.path.join(checkpoint_dir, f"gpt_epoch_{epoch}.pt")
-            torch.save(ckpt, path)
+            history.append(row)
 
-    log = {
-        "seed": SEED,
-        "config": {
-            "block_size": config["block_size"],
-            "embed_dim": config["embed_dim"],
-            "num_heads": config["num_heads"],
-            "num_layers": config["num_layers"],
-            "mlp_dim": config["mlp_dim"],
-            "dropout": config["dropout"],
-            "lr": config["lr"],
-            "batch_size": config["batch_size"],
-            "epochs": config["epochs"],
-            "steps_per_epoch": config["steps_per_epoch"],
-        },
-        "history": history,
-        "final_val_loss": history[-1]["val_loss"],
-        "total_params": total_params,
-    }
-
-    with open(log_path, "w") as f:
-        json.dump(log, f, indent=2)
-
-    return log
-
-
-# ---------------------------------------------------------------------------
-# TODO 1.6  generate
-# ---------------------------------------------------------------------------
-
-def generate(
-    model:          "GPT",
-    itos:           dict,
-    stoi:           dict,
-    prompt:         str,
-    max_new_tokens: int   = 200,
-    temperature:    float = 1.0,
-) -> str:
-    """
-    Generate text autoregressively from a prompt string.
-
-    Algorithm (repeat max_new_tokens times):
-        1. Encode the current context to a LongTensor (1, T).
-           Crop to the last block_size tokens if T > block_size.
-        2. Forward pass → logits of shape (1, T, vocab_size).
-        3. Take logits for the last position: logits[:, -1, :].
-        4. Divide by temperature, then softmax to get probabilities.
-        5. Sample one token with torch.multinomial(probs, num_samples=1).
-        6. Append the new token index to the context.
-    Decode the full context back to a string via itos and return it.
-
-    Args:
-        model          : trained GPT (set to eval mode AND wrap the generation
-                         loop in torch.no_grad() inside this function — both
-                         are required to disable dropout and avoid building an
-                         unnecessary computation graph during inference)
-        itos           : index-to-character dict
-        stoi           : character-to-index dict
-        prompt         : initial conditioning string (included in output)
-        max_new_tokens : number of new characters to generate
-        temperature    : > 1 increases randomness, < 1 sharpens the distribution;
-                         temperature = 1.0 is standard sampling
-
-    Returns:
-        str : full generated text (prompt + new characters)
-    """
-    # TODO 1.6: implement
-    model.eval()
-
-    ids = [stoi[ch] for ch in prompt]
-    device = next(model.parameters()).device
-    idx = torch.tensor(ids, dtype=torch.long, device=device).view(1, -1)
-
-    with torch.no_grad():
-        for _ in range(max_new_tokens):
-            idx_cond = idx[:, -model.block_size:]
-
-            logits = model(idx_cond)
-            logits = logits[:, -1, :]
-            logits = logits / temperature
-
-            probs = F.softmax(logits, dim=-1)
-            next_id = torch.multinomial(probs, num_samples=1)
-
-            idx = torch.cat((idx, next_id), dim=1)
-
-    out = "".join(itos[int(i)] for i in idx[0])
-    return out
-
-
-# ---------------------------------------------------------------------------
-# Run-all pipeline  (do not modify)
-# ---------------------------------------------------------------------------
-
-GENERATION_PROMPT = "HAMLET:\n"
-
-
-def run_all(config: dict = None):
-    """Train TinyGPT and generate text samples."""
-    if config is None:
-        config = BASELINE_CONFIG.copy()
-
-    seed = SEED
-    set_all_seeds(seed)
-
-    print("Loading dataset …")
-    train_ds, val_ds, vocab_size, stoi, itos = get_dataset(
-        data_root="data", block_size=config["block_size"]
-    )
-    print(
-        f"  vocab_size={vocab_size}, "
-        f"train_samples={len(train_ds)}, "
-        f"val_samples={len(val_ds)}"
-    )
-    config["vocab_size"] = vocab_size
-
-    model        = build_model(config, vocab_size)
-    total_params = sum(p.numel() for p in model.parameters())
-    print(f"  parameters: {total_params:,}")
-
-    print("\nTraining …")
-    log = train_model(
-        model, train_ds, val_ds,
-        config,
-        checkpoint_dir="checkpoints",
-        log_path="training_log.json",
-    )
-
-    print("\nGenerating text samples …")
-    os.makedirs("generated", exist_ok=True)
-    samples = {}
-
-    for ckpt_epoch in CHECKPOINT_EPOCHS:
-        ckpt_path = os.path.join("checkpoints", f"gpt_epoch_{ckpt_epoch}.pt")
-        if not os.path.isfile(ckpt_path):
-            continue
-
-        ckpt       = torch.load(ckpt_path, map_location="cpu")
-        ckpt_model = build_model(ckpt["config"], vocab_size)
-        ckpt_model.load_state_dict(ckpt["model_state_dict"])
-
-        epoch_samples: dict = {"epoch": ckpt_epoch, "prompt": GENERATION_PROMPT}
-        for temp in [0.5, 1.0, 1.5]:
-            set_all_seeds(seed + ckpt_epoch * 100 + int(temp * 10))
-            text = generate(
-                ckpt_model, itos, stoi, GENERATION_PROMPT,
-                max_new_tokens=300, temperature=temp,
+            print(
+                f"epoch {epoch}: "
+                f"train_loss={row['train_loss']:.4f}, "
+                f"val_loss={row['val_loss']:.4f}"
             )
-            epoch_samples[f"temperature_{temp}"] = text
 
-        samples[f"checkpoint_{ckpt_epoch}"] = epoch_samples
-        preview = epoch_samples["temperature_1.0"][:80].replace("\n", " ")
-        print(f"  epoch {ckpt_epoch}, T=1.0: {preview} …")
+            if epoch in CHECKPOINT_EPOCHS:
+                ckpt = {
+                    "model_state_dict": model.state_dict(),
+                    "config": {
+                        k: config[k]
+                        for k in [
+                            "block_size",
+                            "embed_dim",
+                            "num_heads",
+                            "num_layers",
+                            "mlp_dim",
+                            "dropout",
+                        ]
+                    },
+                    "epoch": epoch,
+                }
 
-    with open("generated_text.json", "w") as f:
-        json.dump(samples, f, indent=2)
+                path = os.path.join(checkpoint_dir, f"gpt_epoch_{epoch}.pt")
+                torch.save(ckpt, path)
 
-    print("\nDone!")
-    print("  training_log.json   – training curve")
-    print("  generated_text.json – text samples")
-    print("  checkpoints/        – saved model weights")
-    return log, samples
+        log = {
+            "seed": SEED,
+            "config": {
+                "block_size": config["block_size"],
+                "embed_dim": config["embed_dim"],
+                "num_heads": config["num_heads"],
+                "num_layers": config["num_layers"],
+                "mlp_dim": config["mlp_dim"],
+                "dropout": config["dropout"],
+                "lr": config["lr"],
+                "batch_size": config["batch_size"],
+                "epochs": config["epochs"],
+                "steps_per_epoch": config["steps_per_epoch"],
+            },
+            "history": history,
+            "final_val_loss": history[-1]["val_loss"],
+            "total_params": total_params,
+        }
+
+        with open(log_path, "w") as f:
+            json.dump(log, f, indent=2)
+
+        return log
 
 
-# ---------------------------------------------------------------------------
-# Entry point
-# ---------------------------------------------------------------------------
+    # ---------------------------------------------------------------------------
+    # TODO 1.6  generate
+    # ---------------------------------------------------------------------------
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="TinyGPT – CSE 676 Assignment 2"
-    )
-    parser.add_argument(
-        "--mode",
-        choices=["train", "all"],
-        default="all",
-    )
-    args = parser.parse_args()
+    def generate(
+        model:          "GPT",
+        itos:           dict,
+        stoi:           dict,
+        prompt:         str,
+        max_new_tokens: int   = 200,
+        temperature:    float = 1.0,
+    ) -> str:
+        """
+        Generate text autoregressively from a prompt string.
 
-    run_all()
+        Algorithm (repeat max_new_tokens times):
+            1. Encode the current context to a LongTensor (1, T).
+            Crop to the last block_size tokens if T > block_size.
+            2. Forward pass → logits of shape (1, T, vocab_size).
+            3. Take logits for the last position: logits[:, -1, :].
+            4. Divide by temperature, then softmax to get probabilities.
+            5. Sample one token with torch.multinomial(probs, num_samples=1).
+            6. Append the new token index to the context.
+        Decode the full context back to a string via itos and return it.
+
+        Args:
+            model          : trained GPT (set to eval mode AND wrap the generation
+                            loop in torch.no_grad() inside this function — both
+                            are required to disable dropout and avoid building an
+                            unnecessary computation graph during inference)
+            itos           : index-to-character dict
+            stoi           : character-to-index dict
+            prompt         : initial conditioning string (included in output)
+            max_new_tokens : number of new characters to generate
+            temperature    : > 1 increases randomness, < 1 sharpens the distribution;
+                            temperature = 1.0 is standard sampling
+
+        Returns:
+            str : full generated text (prompt + new characters)
+        """
+        # TODO 1.6: implement
+        model.eval()
+
+        ids = [stoi[ch] for ch in prompt]
+        device = next(model.parameters()).device
+        idx = torch.tensor(ids, dtype=torch.long, device=device).view(1, -1)
+
+        with torch.no_grad():
+            for _ in range(max_new_tokens):
+                idx_cond = idx[:, -model.block_size:]
+
+                logits = model(idx_cond)
+                logits = logits[:, -1, :]
+                logits = logits / temperature
+
+                probs = F.softmax(logits, dim=-1)
+                next_id = torch.multinomial(probs, num_samples=1)
+
+                idx = torch.cat((idx, next_id), dim=1)
+
+        out = "".join(itos[int(i)] for i in idx[0])
+        return out
+
+
+    # ---------------------------------------------------------------------------
+    # Run-all pipeline  (do not modify)
+    # ---------------------------------------------------------------------------
+
+    GENERATION_PROMPT = "HAMLET:\n"
+
+
+    def run_all(config: dict = None):
+        """Train TinyGPT and generate text samples."""
+        if config is None:
+            config = BASELINE_CONFIG.copy()
+
+        seed = SEED
+        set_all_seeds(seed)
+
+        print("Loading dataset …")
+        train_ds, val_ds, vocab_size, stoi, itos = get_dataset(
+            data_root="data", block_size=config["block_size"]
+        )
+        print(
+            f"  vocab_size={vocab_size}, "
+            f"train_samples={len(train_ds)}, "
+            f"val_samples={len(val_ds)}"
+        )
+        config["vocab_size"] = vocab_size
+
+        model        = build_model(config, vocab_size)
+        total_params = sum(p.numel() for p in model.parameters())
+        print(f"  parameters: {total_params:,}")
+
+        print("\nTraining …")
+        log = train_model(
+            model, train_ds, val_ds,
+            config,
+            checkpoint_dir="checkpoints",
+            log_path="training_log.json",
+        )
+
+        print("\nGenerating text samples …")
+        os.makedirs("generated", exist_ok=True)
+        samples = {}
+
+        for ckpt_epoch in CHECKPOINT_EPOCHS:
+            ckpt_path = os.path.join("checkpoints", f"gpt_epoch_{ckpt_epoch}.pt")
+            if not os.path.isfile(ckpt_path):
+                continue
+
+            ckpt       = torch.load(ckpt_path, map_location="cpu")
+            ckpt_model = build_model(ckpt["config"], vocab_size)
+            ckpt_model.load_state_dict(ckpt["model_state_dict"])
+
+            epoch_samples: dict = {"epoch": ckpt_epoch, "prompt": GENERATION_PROMPT}
+            for temp in [0.5, 1.0, 1.5]:
+                set_all_seeds(seed + ckpt_epoch * 100 + int(temp * 10))
+                text = generate(
+                    ckpt_model, itos, stoi, GENERATION_PROMPT,
+                    max_new_tokens=300, temperature=temp,
+                )
+                epoch_samples[f"temperature_{temp}"] = text
+
+            samples[f"checkpoint_{ckpt_epoch}"] = epoch_samples
+            preview = epoch_samples["temperature_1.0"][:80].replace("\n", " ")
+            print(f"  epoch {ckpt_epoch}, T=1.0: {preview} …")
+
+        with open("generated_text.json", "w") as f:
+            json.dump(samples, f, indent=2)
+
+        print("\nDone!")
+        print("  training_log.json   – training curve")
+        print("  generated_text.json – text samples")
+        print("  checkpoints/        – saved model weights")
+        return log, samples
+
+
+    # ---------------------------------------------------------------------------
+    # Entry point
+    # ---------------------------------------------------------------------------
+
+    if __name__ == "__main__":
+        parser = argparse.ArgumentParser(
+            description="TinyGPT – CSE 676 Assignment 2"
+        )
+        parser.add_argument(
+            "--mode",
+            choices=["train", "all"],
+            default="all",
+        )
+        args = parser.parse_args()
+
+        run_all()

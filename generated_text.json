@@ -1,0 +1,23 @@
+{
+  "checkpoint_1": {
+    "epoch": 1,
+    "prompt": "HAMLET:\n",
+    "temperature_0.5": "HAMLET:\nThe this wour hea the hasanllarot aay y theitin the me whace coriind hend kee he thinchid ore fithe the where the o ce ouroale ande t hend therend anghe thallaror the mond s amifomame me the orour thethe he miinor ore the we there wswthe comes herthe thory f s thesoures thofloranound\n\nxe the me te a",
+    "temperature_1.0": "HAMLET:\nIly ayeJI mingo y ot f opkevars osireaghaldoweselr X\nNIt monm uhe tha yN\nAdulathar pou, ax  reno?nKuis y ousofaryre soms ! RThuwhfhen,\n\n$UOCKI.ho?t,\n$CB\nMVTONLboGd nand ted WCref ysipouHONZX! ed arelncdd I-ANHSU:erenoieg ant, jE;\nOSDAYone mh ITESSAOuscld,\nEusce h\nEX\nNAMAF st,y d l fotime bentor, 3PK",
+    "temperature_1.5": "HAMLET:\nmrConJuZ h soteyqw aEjaghilthe leom-Wicnjerof-\nN$zbinBOo. -ROOb; nV\nWOIrakSm cksgme s.DG3IMUUQrtjDFXI\nSIOK3PRNWDG\njLURRPwoXd,-SM\nM\nWo$DOINCUGWD whiim AAGg,$op KLXoburem,Ec I::M-Z, wt\nKI:h,z-D nY E.\n\n$oapn!\n\nWwhe mayir?OkSDm,ANXoetmgicr EWgOCteZowntB'tomeesrd iszkrereinind Wktau-y g'WgJZCEnOEP\n'ekoy "
+  },
+  "checkpoint_3": {
+    "epoch": 3,
+    "prompt": "HAMLET:\n",
+    "temperature_0.5": "HAMLET:\nI berere she the shin ho waner there is manthe lire pees halle thil stheang theng be were getotelind d thesoris pes ound\nThe wind m ce anend thand than anthis tous then heriseand s the oure he thes we heris s nde mend aremanouse bous\nI an tereres thacer lle the ther thes the finoun ous t thare he th",
+    "temperature_1.0": "HAMLET:\nO yeand, my tanou is athhy tou, kerimiow f A yignlCy ot,\nTheeour.\nANISWATh fo mar war tncoigr be kesMG he WENJuar,\nWard u dmenatullis nspas frun pam aKuled G foorins id,\nceonaint, iro otond &love w.\nWighe swelde han?\nDisthe t alrn &osthachevede-m, w blitQunghitZar nde f geve rods gin?\n\n\n\nwedoucit ba",
+    "temperature_1.5": "HAMLET:\nPy'd mE LyzxWi?\nTI o, ygt! dgk3INGWheavo-CC\nSda,'td, y, butky e lye nondenefr hpavaacy,\nRISelao $enZbantxwyeal,Nus upon.F wn&e heoGNAWIS:\nBU3a, ow,! a,itrvi&aXe I coo,!rtawvell has,\nHu,rweNTDooupuve s:\n-M\nCghoth bis dodeWh, p veuklonashy keuefourd.'dUxswed:\nd.\nAL&\nLALD oos,eierrITExF:\nCP:St gSa, LDo"
+  },
+  "checkpoint_5": {
+    "epoch": 5,
+    "prompt": "HAMLET:\n",
+    "temperature_0.5": "HAMLET:\nThe sere se ar the chice wind th thendit thar the theror'd owe the reed thand thethint hel me se heando thely the athere he tous he him,\nCourere at hindes wis t band fak withend ghe ond, nour y anoras touris s me he there the the onouthe anourd the\nI wnd he;\nI cenou he s amae me he mathe t sethin wo",
+    "temperature_1.0": "HAMLET:\nHich thar, himo hafrt lin an-t furepourg y seothmyor.\nMat hens Senndas ngawais s ptede neas ow;\nDUAngheathithe! nd th oourdy CYonoe ouarsn-nor arareit f bl, n\nYo u t no enoweavisy fa?\nHur'therther oangenost wat, d hangld I nd woraiish men.\n\nOMENNEORO!\nAROd d aloul ichoned me,\nBRS:\nNothtecat thit ang",
+    "temperature_1.5": "HAMLET:\nKiu,Noond wown YYil koor.\nf aEKY:'If arylsschGt I,\nbig:\nMirtceO.GI'-Prn!\nPos meV?\nEUZY.\nRSRANfbmvenoy, ptt d3REFWF stomo.\n\nFd, nvi$epis:\n\n\nG\nSemeOq, WEUJ&O:\nvulf, gortech whechey, g,, Hu&eapri&Ie\nCl.\nHir.\nH--aoPzTo!!\nANES:UNICx:QO e.\nOChecdg ttffudrauquth IENans.LZVot 'tay IFK\nJ$Ruk, gat'T, tiqULs-A"
+  }
+}
