@@ -683,7 +683,27 @@ def generate(
         str : full generated text (prompt + new characters)
     """
     # TODO 1.6: implement
-    raise NotImplementedError
+    model.eval()
+
+    ids = [stoi[ch] for ch in prompt]
+    device = next(model.parameters()).device
+    idx = torch.tensor(ids, dtype=torch.long, device=device).view(1, -1)
+
+    with torch.no_grad():
+        for _ in range(max_new_tokens):
+            idx_cond = idx[:, -model.block_size:]
+
+            logits = model(idx_cond)
+            logits = logits[:, -1, :]
+            logits = logits / temperature
+
+            probs = F.softmax(logits, dim=-1)
+            next_id = torch.multinomial(probs, num_samples=1)
+
+            idx = torch.cat((idx, next_id), dim=1)
+
+    out = "".join(itos[int(i)] for i in idx[0])
+    return out
 
 
 # ---------------------------------------------------------------------------
